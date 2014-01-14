@@ -3,7 +3,6 @@ import os
 
 from msgbox import logger
 from msgbox.actor import Actor, Message
-from msgbox.message import WorkerMessage
 
 
 DUMP_FILE = os.path.expanduser('~/.msgboxrc')
@@ -88,6 +87,11 @@ class SimConfigDB(Actor):
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
+class WorkerMessage(Message):
+
+    def __init__(self, worker):
+        self.worker = worker
 
 class SimConfigChanged(Message): pass
 class ImsiRegister(WorkerMessage): pass
