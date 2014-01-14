@@ -48,7 +48,6 @@ class ModemWorker(Actor):
         self._state = new_state
 
     def run(self):
-        self.modem = GsmModem(self.dev, 9600)
         step = self.connect
         try:
             while True:
@@ -56,12 +55,13 @@ class ModemWorker(Actor):
                 if step is None:
                     break
         finally:
-            self.modem.close()
+            self._try_modem_close()
 
     def connect(self):
         self.state = 'connecting'
         while True:
             try:
+                self.modem = GsmModem(self.dev, 9600)
                 self.modem.connect()
             except TimeoutException:
                 self.state = 'no modem detected'
@@ -75,7 +75,7 @@ class ModemWorker(Actor):
                     self.state = 'error %s' % e
                 else:
                     return self.register
-            self.modem.close()
+            self._try_modem_close()
             msg = self.receive(typ=StopActor, timeout=60)
             if isinstance(msg, StopActor):
                 return None
@@ -103,7 +103,7 @@ class ModemWorker(Actor):
                 return self.work
 
     def deactivate(self):
-        elf.state = 'deactivated'
+        self.state = 'deactivated'
         self.receive(typ=StopActor)
         return None
 
@@ -120,3 +120,12 @@ class ModemWorker(Actor):
                                revision=modem.revision,
                                signal=sig_stren_desc(modem.signalStrength))
         return imsi, modem_info
+
+    def _try_modem_close(self):
+        if self.modem is not None:
+            try:
+                self.modem.close()
+            except Exception, e:
+                logger.info('error while closing modem: %s', e)
+            finally:
+                self.modem = None
