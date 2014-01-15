@@ -3,7 +3,7 @@ from collections import namedtuple
 from gsmmodem.modem import GsmModem, TimeoutException
 
 from msgbox import logger
-from msgbox.actor import Actor, StopActor
+from msgbox.actor import Actor, StopActor, Timeout
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
                         ImsiUnregister, SimConfigChanged)
 
@@ -60,48 +60,56 @@ class ModemWorker(Actor):
 
     def connect(self):
         self.state = 'connecting'
-        while True:
+        try:
+            self.modem = GsmModem(self.dev, 9600)
+            self.modem.connect()
+        except TimeoutException:
+            self.state = 'no modem detected'
+        except Exception, e:
+            self.state = 'error %s' % e
+        else:
+            logger.debug('found modem on %r', self.dev)
             try:
-                self.modem = GsmModem(self.dev, 9600)
-                self.modem.connect()
-            except TimeoutException:
-                self.state = 'no modem detected'
+                self.imsi, self.modem_info = self.get_modem_info()
             except Exception, e:
                 self.state = 'error %s' % e
             else:
-                logger.debug('found modem on %r', self.dev)
-                try:
-                    self.imsi, self.modem_info = self.get_modem_info()
-                except Exception, e:
-                    self.state = 'error %s' % e
-                else:
-                    return self.register
-            self._try_modem_close()
-            msg = self.receive(typ=StopActor, timeout=60)
-            if isinstance(msg, StopActor):
-                return None
+                return self.register
+
+        self._try_modem_close()
+        msg = self.receive(typ=StopActor, timeout=60)
+        if isinstance(msg, StopActor):
+            return None
+        if isinstance(msg, Timeout):
+            return self.connect
 
     def register(self):
-        while True:
-            sim_manager.send(ImsiRegister(self))
-            registration = self.receive(typ=ImsiRegistration)
-            if registration.success:
-                self.sim_config = registration.config
-                if self.sim_config.is_startable:
-                    return self.work
-            else:
-                return self.deactivate
-
-            if self.sim_config.active:
-                self.state = 'waiting config'
-            else:
-                self.state = 'stopped'
-            msg = self.receive(typ=(StopActor, SimConfigChanged))
-            if isinstance(msg, StopActor):
-                sim_manager.send(ImsiUnregister(self))
-                return None
-            elif isinstance(msg, SimConfigChanged):
+        sim_manager.send(ImsiRegister(self))
+        registration = self.receive(typ=ImsiRegistration)
+        if registration.success:
+            self.sim_config = registration.config
+            if self.sim_config.is_startable:
                 return self.work
+            else:
+                return self.stop
+        else:
+            return self.deactivate
+
+    def stop(self):
+        if self.sim_config.active:
+            self.state = 'waiting for config'
+        else:
+            self.state = 'stopped'
+        msg = self.receive(typ=(StopActor, SimConfigChanged))
+        if isinstance(msg, StopActor):
+            sim_manager.send(ImsiUnregister(self))
+            return None
+        elif isinstance(msg, SimConfigChanged):
+            return self.work
+        elif isinstance(msg, Timeout):
+            return self.register
+        else:
+            raise ValueError('unexpected msg type %s' % msg)
 
     def deactivate(self):
         self.state = 'deactivated'
