@@ -10,7 +10,7 @@ from collections import namedtuple
 from serial.tools.list_ports import comports
 
 from msgbox import logger
-from msgbox.actor import Actor, StopActor
+from msgbox.actor import Actor, StopActor, Timeout
 from msgbox.worker import ModemWorker
 
 
@@ -60,7 +60,7 @@ class SerialPortManager(Actor):
                     worker.send(StopActor())
                 self.dev2worker = {}
                 break
-            elif msg is None:
+            elif isinstance(msg, Timeout):
                 continue
             else:
                 raise ValueError('unexpected msg type %s' % msg)

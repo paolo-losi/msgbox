@@ -14,6 +14,9 @@ class Message(object):
 class StopActor(Message):
     pass
 
+class Timeout(Message):
+    pass
+
 
 class Actor(object):
 
@@ -33,7 +36,7 @@ class Actor(object):
             logger.error('unprocessed msg(s): %s', self.unprocessed)
         while True:
             msg = self.receive(timeout=10)
-            if msg is None:
+            if isinstance(msg, Timeout):
                 break
 
     def run(self):
@@ -51,7 +54,7 @@ class Actor(object):
             try:
                 msg = self.queue.get(block=block, timeout=left)
             except Empty:
-                return None
+                return Timeout()
             if typ is None or isinstance(msg, typ):
                 return msg
             else:
