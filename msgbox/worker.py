@@ -70,7 +70,7 @@ class ModemWorker(Actor):
         else:
             logger.debug('found modem on %r', self.dev)
             try:
-                self.imsi, self.modem_info = self.get_modem_info()
+                self.imsi, self.modem_info = self._get_modem_info()
             except Exception, e:
                 self.state = 'error %s' % e
             else:
@@ -119,7 +119,7 @@ class ModemWorker(Actor):
     # FIXME
     work = deactivate
 
-    def get_modem_info(self):
+    def _get_modem_info(self):
         modem = self.modem
         imsi = modem.imsi
         modem_info = ModemInfo(imei=modem.imei,
