@@ -29,12 +29,13 @@ class ModemWorker(Actor):
 
     def __init__(self, dev, serial_info):
         self.dev = dev
+        self.imsi = None
         self.serial_info = serial_info
         self.modem_info = None
+        self.sim_config = None
+
         self.modem = None
         self.state = 'initialized'
-        self.sim_config = None
-        self.imsi = None
         super(ModemWorker, self).__init__('Modem %s' % dev)
 
     @property
@@ -43,7 +44,7 @@ class ModemWorker(Actor):
 
     @state.setter
     def state(self, new_state):
-        if hasattr(self, '_state'):
+        if hasattr(self, '_state') and new_state != self._state:
             logger.info('STATE %s -> %s', self._state, new_state)
         self._state = new_state
 
