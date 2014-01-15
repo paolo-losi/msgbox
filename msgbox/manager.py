@@ -44,12 +44,12 @@ class SerialPortManager(Actor):
                 mw.start()
                 self.dev2worker[dev] = mw
 
-        for dev in self.dev2worker:
+        for dev in self.dev2worker.keys():
             if dev not in serial_devices:
-                logger.info('stopping stale worker for device %s', dev)
+                logger.info('stopping worker for device %s', dev)
                 worker = self.dev2worker[dev]
-                worker.send(StopActor)
-                self._remove_worker(worker)
+                worker.send(StopActor())
+                self.remove_worker(worker)
 
     def run(self):
         while True:
@@ -57,6 +57,7 @@ class SerialPortManager(Actor):
             msg = self.receive(timeout=5)
             if isinstance(msg, StopActor):
                 for worker in self.dev2worker.itervalues():
+                    logger.info('stopping worker for device %s', worker.dev)
                     worker.send(StopActor())
                 self.dev2worker = {}
                 break

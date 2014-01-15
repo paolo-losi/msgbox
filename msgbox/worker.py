@@ -58,6 +58,8 @@ class ModemWorker(Actor):
         finally:
             self._try_modem_close()
 
+    # ~~~~~ STATES ~~~~~
+
     def connect(self):
         self.state = 'connecting'
         try:
@@ -77,7 +79,7 @@ class ModemWorker(Actor):
                 return self.register
 
         self._try_modem_close()
-        msg = self.receive(typ=StopActor, timeout=60)
+        msg = self.receive(typ=StopActor, timeout=5)
         if isinstance(msg, StopActor):
             return None
         if isinstance(msg, Timeout):
@@ -118,6 +120,8 @@ class ModemWorker(Actor):
 
     # FIXME
     work = deactivate
+
+    # ~~~~~ utils ~~~~~
 
     def _get_modem_info(self):
         modem = self.modem

@@ -35,7 +35,7 @@ class Actor(object):
         if self.unprocessed:
             logger.error('unprocessed msg(s): %s', self.unprocessed)
         while True:
-            msg = self.receive(timeout=10)
+            msg = self.receive(timeout=2)
             if isinstance(msg, Timeout):
                 break
 
