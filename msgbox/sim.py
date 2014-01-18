@@ -103,6 +103,11 @@ class ImsiRegistration(Message):
         self.success = success
         self.config = config
 
+class StopSimManager(StopActor):
+
+    def __init__(self, callback):
+        self.callback = callback
+
 
 class SimManager(Actor):
 
@@ -126,11 +131,14 @@ class SimManager(Actor):
                 self._shutting_down = True
             else:
                 raise ValueError('unexpected msg type %s' % msg)
+
             if self._shutting_down and not self.imsi2worker:
+                if msg.callback:
+                    msg.callback()
                 break
 
-    def stop(self):
-        self.send(StopActor())
+    def stop(self, callback=None):
+        self.send(StopSimManager(callback))
 
     def register(self, worker):
         imsi = worker.imsi
