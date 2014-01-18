@@ -13,8 +13,17 @@ class Message(object):
 class StopActor(Message):
     pass
 
+class ChannelClosed(Message):
+    pass
+
 class Timeout(Message):
     pass
+
+
+class RejectedMsgException(Exception):
+
+    def __init__(self, msg):
+        self.msg = msg
 
 
 class Actor(object):
@@ -24,6 +33,8 @@ class Actor(object):
         self.thread.daemon = daemon
         self.queue = Queue()
         self.unprocessed = []
+        self.mutex = threading.Lock()
+        self._acceptable_msgs = None
 
     def start(self):
         self.thread.start()
@@ -31,12 +42,18 @@ class Actor(object):
     def _run(self):
         logger.debug('actor "%s" started', self.thread.name)
         self.run()
-        if self.unprocessed:
-            logger.error('unprocessed msg(s): %s', self.unprocessed)
+        with self.mutex:
+            self._acceptable_msgs = ()
+        unprocessed = list(self.unprocessed)
         while True:
-            msg = self.receive(timeout=2)
+            msg = self.receive(block=False)
             if isinstance(msg, Timeout):
                 break
+            else:
+                unprocessed.append(msg)
+        if unprocessed:
+            logger.error('unprocessed msg(s): %s', unprocessed)
+        logger.debug('actor has quit')
 
     def run(self):
         raise NotImplementedError()
@@ -72,7 +89,24 @@ class Actor(object):
                     return unprocessed.pop(i)
         return None
 
+    def accept_only(self, types):
+        with self.mutex:
+            self._acceptable_msgs = types
+
+    def accept_all(self):
+        with self.mutex:
+            self._acceptable_msgs = None
+
+    def close_channel(self):
+        with self.mutex:
+            self._acceptable_msgs = ()
+            self.queue.put(ChannelClosed())
+
     def send(self, msg):
         if not isinstance(msg, Message):
             raise ValueError('%s is not a Message instance' % msg)
-        self.queue.put(msg)
+        with self.mutex:
+            if self._acceptable_msgs is not None:
+                if not isinstance(msg, self._acceptable_msgs):
+                    raise RejectedMsgException(msg)
+            self.queue.put(msg)

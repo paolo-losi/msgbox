@@ -3,7 +3,7 @@ from collections import namedtuple
 from gsmmodem.modem import GsmModem, TimeoutException
 
 from msgbox import logger
-from msgbox.actor import Actor, StopActor, Timeout
+from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
                         ImsiUnregister, SimConfigChanged)
 
@@ -81,11 +81,25 @@ class ModemWorker(Actor):
         self._try_modem_close()
         msg = self.receive(typ=StopActor, timeout=5)
         if isinstance(msg, StopActor):
-            return None
+            return self.shutdown
         if isinstance(msg, Timeout):
             return self.connect
 
+    def shutdown(self):
+        self.state = 'shutting down'
+        self.close_channel()
+        if self.sim_config is not None:
+            sim_manager.send(ImsiUnregister(self))
+        self._try_modem_close()
+        msg = self.receive()
+        if isinstance(msg, ChannelClosed):
+            return None
+        else:
+            logger.error('unexpected msg type %s', msg)
+            return self.shutdown
+
     def register(self):
+        assert self.sim_config is None
         sim_manager.send(ImsiRegister(self))
         registration = self.receive(typ=ImsiRegistration)
         if registration.success:
@@ -104,8 +118,7 @@ class ModemWorker(Actor):
             self.state = 'stopped'
         msg = self.receive(typ=(StopActor, SimConfigChanged))
         if isinstance(msg, StopActor):
-            sim_manager.send(ImsiUnregister(self))
-            return None
+            return self.shutdown
         elif isinstance(msg, SimConfigChanged):
             return self.work
         elif isinstance(msg, Timeout):
@@ -116,7 +129,7 @@ class ModemWorker(Actor):
     def deactivate(self):
         self.state = 'deactivated'
         self.receive(typ=StopActor)
-        return None
+        return self.shutdown
 
     # FIXME
     work = deactivate

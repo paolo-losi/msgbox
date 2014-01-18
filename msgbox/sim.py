@@ -2,7 +2,7 @@ import json
 import os
 
 from msgbox import logger
-from msgbox.actor import Actor, Message, StopActor
+from msgbox.actor import Actor, Message, StopActor, ChannelClosed
 
 
 DUMP_FILE = os.path.expanduser('~/.msgboxrc')
@@ -108,6 +108,15 @@ class StopSimManager(StopActor):
     def __init__(self, callback):
         self.callback = callback
 
+class SendSms(Message):
+
+    def __init__(self, text, receiver, sender, imsi, key):
+        self.text = text
+        self.receiver = receiver
+        self.sender = sender
+        self.imsi = imsi
+        self.key = key
+
 
 class SimManager(Actor):
 
@@ -118,6 +127,7 @@ class SimManager(Actor):
         self.imsi2worker = {}
         self.sim_config_db = SimConfigDB()
         self._shutting_down = False
+        self._shutdown_callback = None
         super(SimManager, self).__init__('SimManager')
 
     def run(self):
@@ -127,18 +137,28 @@ class SimManager(Actor):
                 self.register(msg.worker)
             elif isinstance(msg, ImsiUnregister):
                 self.unregister(msg.worker)
-            elif isinstance(msg, StopActor):
+            elif isinstance(msg, StopSimManager):
                 self._shutting_down = True
+                self._shutdown_callback = msg.callback
             else:
                 raise ValueError('unexpected msg type %s' % msg)
 
             if self._shutting_down and not self.imsi2worker:
-                if msg.callback:
-                    msg.callback()
-                break
+                self.close_channel()
+                return self.shutdown()
 
     def stop(self, callback=None):
         self.send(StopSimManager(callback))
+
+    def shutdown(self):
+        while True:
+            msg = self.receive()
+            if isinstance(msg, ChannelClosed):
+                if self._shutdown_callback:
+                    self._shutdown_callback()
+                    break
+            else:
+                logger.error('unexpected msg %s', msg)
 
     def register(self, worker):
         imsi = worker.imsi

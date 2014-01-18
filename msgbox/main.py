@@ -1,8 +1,9 @@
 import logging
 logging.basicConfig(level=logging.INFO,
                     format='[%(levelname)1.1s %(asctime)s] '
+                           '%(name)-15s '
                            '%(threadName)-20s '
-                           '%(name)-10s %(message)s')
+                           '%(message)s')
 
 import tornado.ioloop
 
