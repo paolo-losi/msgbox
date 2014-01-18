@@ -10,7 +10,6 @@ logger = logging.getLogger('actor')
 class Message(object):
     pass
 
-
 class StopActor(Message):
     pass
 
