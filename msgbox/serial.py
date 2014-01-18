@@ -1,10 +1,4 @@
-# imsi + descrizione + numero + acceso + stato + url
-# il thread deve periodicamente verificare:
-#    - segnale
-#    - stato della rete
-#    - imsi
-# come verificare disconnessioni
-
+from __future__ import absolute_import
 from collections import namedtuple
 
 from serial.tools.list_ports import comports
@@ -65,3 +59,9 @@ class SerialPortManager(Actor):
                 continue
             else:
                 raise ValueError('unexpected msg type %s' % msg)
+
+    def stop(self):
+        self.send(StopActor())
+
+
+serial_manager = SerialPortManager()

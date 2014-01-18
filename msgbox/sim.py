@@ -2,7 +2,7 @@ import json
 import os
 
 from msgbox import logger
-from msgbox.actor import Actor, Message
+from msgbox.actor import Actor, Message, StopActor
 
 
 DUMP_FILE = os.path.expanduser('~/.msgboxrc')
@@ -112,7 +112,8 @@ class SimManager(Actor):
         # ModemWorker that exclusively grabs the modem.
         self.imsi2worker = {}
         self.sim_config_db = SimConfigDB()
-        super(SimManager, self).__init__('SimManager', daemon=True)
+        self._shutting_down = False
+        super(SimManager, self).__init__('SimManager')
 
     def run(self):
         while True:
@@ -121,8 +122,15 @@ class SimManager(Actor):
                 self.register(msg.worker)
             elif isinstance(msg, ImsiUnregister):
                 self.unregister(msg.worker)
+            elif isinstance(msg, StopActor):
+                self._shutting_down = True
             else:
                 raise ValueError('unexpected msg type %s' % msg)
+            if self._shutting_down and not self.imsi2worker:
+                break
+
+    def stop(self):
+        self.send(StopActor())
 
     def register(self, worker):
         imsi = worker.imsi
@@ -145,7 +153,3 @@ class SimManager(Actor):
 
     def unregister(self, worker):
         del self.imsi2worker[worker.imsi]
-
-
-sim_manager = SimManager()
-sim_manager.start()
