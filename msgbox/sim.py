@@ -153,3 +153,6 @@ class SimManager(Actor):
 
     def unregister(self, worker):
         del self.imsi2worker[worker.imsi]
+
+
+sim_manager = SimManager()
