@@ -5,7 +5,8 @@ from gsmmodem.modem import GsmModem, TimeoutException
 from msgbox import logger
 from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
-                        ImsiUnregister, SimConfigChanged)
+                        ImsiUnregister, SimConfigChanged, TxSms)
+from msgbox.util import status
 
 
 # TODO make me nicer
@@ -116,13 +117,16 @@ class ModemWorker(Actor):
             self.state = 'waiting for config'
         else:
             self.state = 'stopped'
-        msg = self.receive(typ=(StopActor, SimConfigChanged))
+        msg = self.receive(typ=(StopActor, SimConfigChanged, TxSms))
         if isinstance(msg, StopActor):
             return self.shutdown
         elif isinstance(msg, SimConfigChanged):
             return self.work
         elif isinstance(msg, Timeout):
             return self.register
+        elif isinstance(msg, TxSms):
+            self._send_sms_when_stopped(msg)
+            return self.stop
         else:
             raise ValueError('unexpected msg type %s' % msg)
 
@@ -135,6 +139,15 @@ class ModemWorker(Actor):
     work = deactivate
 
     # ~~~~~ utils ~~~~~
+
+    def _send_sms_when_stopped(self, tx_sms):
+        assert tx_sms.sender is None
+        if not self.sim_config.active:
+            err_msg = '%s: modem is not active' % tx_sms
+            tx_sms.callback(status('ERROR', err_msg))
+        else:
+            # FIXME sendsms
+            tx_sms.callback(status('OK', '%s: sent' % tx_sms))
 
     def _get_modem_info(self):
         modem = self.modem

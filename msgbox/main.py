@@ -1,16 +1,17 @@
 import logging
-logging.basicConfig(level=logging.INFO,
-                    format='[%(levelname)1.1s %(asctime)s] '
-                           '%(name)-15s '
-                           '%(threadName)-20s '
-                           '%(message)s')
-
 import tornado.ioloop
 
 from msgbox import logger
 from msgbox.http import http_manager
 from msgbox.serial import serial_manager
 from msgbox.sim import sim_manager
+
+
+logging.basicConfig(level=logging.INFO,
+                    format='[%(levelname)1.1s %(asctime)s] '
+                           '%(name)-15s '
+                           '%(threadName)-20s '
+                           '%(message)s')
 
 
 def stop_ioloop():

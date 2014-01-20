@@ -1,7 +1,14 @@
+from functools import partial
+
 import tornado.httpserver
-from tornado.web import HTTPError, RequestHandler, Application
+import tornado.ioloop
+from tornado.web import HTTPError, RequestHandler, Application, asynchronous
 
 from msgbox import logger
+from msgbox.sim import sim_manager, TxSms
+
+
+ioloop = tornado.ioloop.IOLoop.instance()
 
 
 # application/x-www-form-urlencoded
@@ -14,19 +21,30 @@ from msgbox import logger
 
 class MTHandler(RequestHandler):
 
+    @asynchronous
     def post(self):
-        text     = self.get_argument('text')
-        receiver = self.get_argument('receiver')
-        key      = self.get_argument('key', None)
-
         sender   = self.get_argument('sender', None)
+        receiver = self.get_argument('receiver')
+        text     = self.get_argument('text')
         imsi     = self.get_argument('imsi', None)
+        key      = self.get_argument('key', None)
 
         if not ((sender is None) ^ (imsi is None)):
             err_msg = 'Use either "sender" or "imsi" params'
             raise HTTPError(400, err_msg)
 
-        self.write("Hello, world")
+        sim_manager.send(TxSms(sender, receiver, text, imsi, key,
+                               callback=self.reply_callback))
+
+    def reply_callback(self, response_dict):
+        ioloop.add_callback(partial(self.handle_reply, response_dict))
+
+    def handle_reply(self, response_dict):
+        log_method = logger.warn if response_dict['status'] == 'ERROR' else \
+                     logger.info
+        log_method(response_dict['desc'])
+        self.write(response_dict)
+        self.finish()
 
 
 class HTTPManager(object):
