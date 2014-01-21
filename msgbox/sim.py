@@ -57,7 +57,7 @@ class SimConfigDB(Actor):
 
     def add(self, imsi):
         assert imsi not in self.imsi2config
-        sm_config = SimConfig(imsi)
+        sim_config = SimConfig(imsi)
         self._insert(sim_config)
         self._save_dump()
 
@@ -112,9 +112,11 @@ class WorkerMessage(Message):
     def __init__(self, worker):
         self.worker = worker
 
+
 class SimConfigChanged(Message): pass
 class ImsiRegister(WorkerMessage): pass
 class ImsiUnregister(WorkerMessage): pass
+
 
 class ImsiRegistration(Message):
 
@@ -122,12 +124,14 @@ class ImsiRegistration(Message):
         self.success = success
         self.config = config
 
+
 class StopSimManager(StopActor):
 
     def __init__(self, callback):
         self.callback = callback
 
-class TxSms(Message):
+
+class TxSmsReq(Message):
 
     def __init__(self, sender, receiver, text, imsi, key, callback=None):
         self.sender = sender
@@ -143,6 +147,12 @@ class TxSms(Message):
         else:
             field = 'imsi "%s"' % self.imsi
         return "sms tx request for %s" % field
+
+
+class RxSmsReq(Message):
+
+    def __init__(self, sms):
+        self.sms = sms
 
 
 class SimManager(Actor):
@@ -169,7 +179,7 @@ class SimManager(Actor):
             elif isinstance(msg, StopSimManager):
                 self._shutting_down = True
                 self._shutdown_callback = msg.callback
-            elif isinstance(msg, TxSms):
+            elif isinstance(msg, TxSmsReq):
                 self.route(msg)
             else:
                 raise ValueError('unexpected msg type %s' % msg)

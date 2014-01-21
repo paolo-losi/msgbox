@@ -1,11 +1,15 @@
+import time
+import urllib2
+from Queue import Queue, Empty
 from functools import partial
+from threading import Thread, Lock
 
 import tornado.httpserver
 import tornado.ioloop
 from tornado.web import HTTPError, RequestHandler, Application, asynchronous
 
 from msgbox import logger
-from msgbox.sim import sim_manager, TxSms
+from msgbox.sim import sim_manager, TxSmsReq
 
 
 ioloop = tornado.ioloop.IOLoop.instance()
@@ -33,8 +37,8 @@ class MTHandler(RequestHandler):
             err_msg = 'Use either "sender" or "imsi" params'
             raise HTTPError(400, err_msg)
 
-        sim_manager.send(TxSms(sender, receiver, text, imsi, key,
-                               callback=self.reply_callback))
+        sim_manager.send(TxSmsReq(sender, receiver, text, imsi, key,
+                                  callback=self.reply_callback))
 
     def reply_callback(self, response_dict):
         ioloop.add_callback(partial(self.handle_reply, response_dict))
@@ -47,7 +51,7 @@ class MTHandler(RequestHandler):
         self.finish()
 
 
-class HTTPManager(object):
+class HTTPServerManager(object):
 
     def __init__(self, port=8888):
         app = Application([
@@ -64,4 +68,62 @@ class HTTPManager(object):
         self.http_server.stop()
 
 
-http_manager = HTTPManager()
+http_server_manager = HTTPServerManager()
+
+
+# ~~~~~~~~ HTTP Client Manager ~~~~~~~~
+
+class HTTPClientManagerStoppingError(Exception): pass
+
+
+class HTTPClientManager(object):
+
+    N_WORKERS = 10
+
+    def __init__(self):
+        self.active = False
+        self.workers = []
+        self.queue = Queue()
+        self.mutex = Lock()
+
+    def start(self):
+        self.active = True
+        for i in xrange(self.N_WORKERS):
+            thread = Thread(name='HttpClient %d' % i, target=self._work)
+            self.workers.append(thread)
+            thread.start()
+
+    def stop(self):
+        with self.mutex:
+            self.active = False
+
+    def _work(self):
+        while self.active or not self.queue.empty:
+            try:
+                msg_dict = self.queue.get(timeout=2)
+            except Empty:
+                continue
+            url = msg_dict.pop('url')
+            for attempt in xrange(3):
+                try:
+                    urllib2.urlopen(url, msg_dict, timeout=20)
+                    logger.error('forwarded sms - sender=%s receiver=%s',
+                                     msg_dict['sender'], msg_dict['receiver'])
+                    break
+                except Exception, e:
+                    logger.error('error while sending msg', exc_info=True)
+                time.sleep(10)
+            else:
+                logger.error('giving up sending message %s', msg_dict,
+                                                             exc_info=1)
+
+    def enqueue(self, rx_sms):
+        with self.mutex:
+            if self.active:
+                self.queue.put(rx_sms)
+            else:
+                raise HTTPClientManagerStoppingError()
+
+
+http_client_manager = HTTPClientManager()
+

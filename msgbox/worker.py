@@ -1,11 +1,13 @@
 from collections import namedtuple
 
-from gsmmodem.modem import GsmModem, TimeoutException
+from gsmmodem.modem import (GsmModem, TimeoutException, InvalidStateException,
+                            ReceivedSms, StatusReport)
 
 from msgbox import logger
 from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
+from msgbox.http import http_client_manager
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
-                        ImsiUnregister, SimConfigChanged, TxSms)
+                        ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq)
 from msgbox.util import status
 
 
@@ -64,8 +66,9 @@ class ModemWorker(Actor):
     def connect(self):
         self.state = 'connecting'
         try:
-            self.modem = GsmModem(self.dev, 9600)
-            self.modem.connect()
+            self.modem = GsmModem(self.dev, 9600,
+                                  smsReceivedCallbackFunc=self._rx_sms)
+            self.modem.connect('6699')
         except TimeoutException:
             self.state = 'no modem detected'
         except Exception, e:
@@ -117,28 +120,63 @@ class ModemWorker(Actor):
             self.state = 'waiting for config'
         else:
             self.state = 'stopped'
-        msg = self.receive(typ=(StopActor, SimConfigChanged, TxSms))
+        msg = self.receive()
         if isinstance(msg, StopActor):
             return self.shutdown
         elif isinstance(msg, SimConfigChanged):
+            # FIXME
             return self.work
         elif isinstance(msg, Timeout):
             return self.register
-        elif isinstance(msg, TxSms):
+        elif isinstance(msg, TxSmsReq):
             self._send_sms_when_stopped(msg)
             return self.stop
+        elif isinstance(msg, RxSmsReq):
+            # FIXME enqueue somewhere?
+            sms = msg.sms
+            logger.error('NOT processing sms from %s %r', sms.number, sms.text)
+            return self.stop
         else:
-            raise ValueError('unexpected msg type %s' % msg)
+            logger.error('unexpected msg type %s', msg)
+            return self.stop
 
     def deactivate(self):
+        # FIXME is that correct to close here?
+        self._try_modem_close()
         self.state = 'deactivated'
         self.receive(typ=StopActor)
         return self.shutdown
 
-    # FIXME
-    work = deactivate
+    def work(self):
+        self.state = 'working'
+        self._process_backlog()
+        msg = self.receive(timeout=2)
+        if isinstance(msg, StopActor):
+            return self.shutdown
+        elif isinstance(msg, SimConfigChanged):
+            # FIXME
+            return self.work
+        elif isinstance(msg, Timeout):
+            self._is_network_available()
+            return self.work
+        elif isinstance(msg, TxSmsReq):
+            self._send_sms(msg)
+            return self.work
+        elif isinstance(msg, RxSmsReq):
+            self._process_mo_sms(msg.sms)
+            return self.work
+        else:
+            logger.error('unexpected msg type %s', msg)
+
 
     # ~~~~~ utils ~~~~~
+
+    def _process_backlog(self):
+        try:
+            self.modem.processStoredSms()
+        except Exception, e:
+            logger.error('error while processing stored sms', exc_info=True)
+
 
     def _send_sms_when_stopped(self, tx_sms):
         assert tx_sms.sender is None
@@ -146,8 +184,44 @@ class ModemWorker(Actor):
             err_msg = '%s: modem is not active' % tx_sms
             tx_sms.callback(status('ERROR', err_msg))
         else:
-            # FIXME sendsms
-            tx_sms.callback(status('OK', '%s: sent' % tx_sms))
+            self._send_sms(tx_sms)
+
+    def _send_sms(self, tx_sms):
+        # TODO handle delivery report
+        if not self._is_network_available():
+            err_msg = '%s: network unavailable' % tx_sms
+            tx_sms.callback(status('ERROR', err_msg))
+            return
+        try:
+            self.modem.sendSms(tx_sms.receiver, tx_sms.text)
+        except Exception, e:
+            tx_sms.callback(status('ERROR', '%s: %r' % (tx_sms, e)))
+        else:
+            tx_sms.callback(status('OK', '%s: sms sent' % tx_sms))
+
+    def _is_network_available(self):
+        try:
+            sig_strength = self.modem.waitForNetworkCoverage(timeout=3)
+            ret = sig_strength > 0
+        except (TimeoutException, InvalidStateException), e:
+            ret = False
+        except Exception, e:
+            ret = False
+        _log = logger.info if ret else logger.error
+        _log('network check: available=%s', ret)
+        return ret
+
+    def _rx_sms(self, sms):
+        if isinstance(sms, ReceivedSms):
+            self.send(RxSmsReq(sms))
+
+    def _process_mo_sms(self, sms):
+        http_client_manager.enqueue(dict(
+                        sender=sms.number,
+                        receiver=self.sim_config.phone_number,
+                        text=sms.text,
+                        tstamp=sms.time,
+                        url=self.sim_config.url))
 
     def _get_modem_info(self):
         modem = self.modem
