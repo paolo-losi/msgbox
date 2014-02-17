@@ -1,4 +1,6 @@
 from __future__ import absolute_import
+import os
+import sys
 from collections import namedtuple
 
 from serial.tools.list_ports import comports
@@ -8,12 +10,19 @@ from msgbox.actor import Actor, StopActor, Timeout
 from msgbox.worker import ModemWorker
 
 
+plat = sys.platform.lower()
+
+
 SerialPortInfo = namedtuple('SerialPortInfo', ['dev', 'desc', 'hw'])
 
 
 class SerialPortManager(Actor):
 
-    def __init__(self):
+    def __init__(self, usb_only):
+        self.usb_only = usb_only
+        if usb_only and plat[:5] != 'linux':
+            logger.error('--usb-only supported only on linux (ignored)')
+            self.usb_only = False
         self.dev2worker = {}  # {'/dev/ttyS0': ModemHandler(), ...
         super(SerialPortManager, self).__init__('SerialPortManager')
 
@@ -29,6 +38,11 @@ class SerialPortManager(Actor):
             dev, desc, hw = d
             if hw == 'n/a':
                 continue
+            if self.usb_only:
+                base = os.path.basename(dev)
+                if (not base.startswith('ttyACM') and
+                    not base.startswith('ttyUSB')):
+                    continue
 
             serial_devices.add(dev)
 
@@ -62,6 +76,3 @@ class SerialPortManager(Actor):
 
     def stop(self):
         self.send(StopActor())
-
-
-serial_manager = SerialPortManager()

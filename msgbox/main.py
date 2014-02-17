@@ -1,17 +1,18 @@
+import argparse
 import logging
 import tornado.ioloop
 
 from msgbox import logger
 from msgbox.http import http_server_manager, http_client_manager
-from msgbox.serial import serial_manager
+from msgbox.serial import SerialPortManager
 from msgbox.sim import sim_manager
 
 
-logging.basicConfig(level=logging.INFO,
-                    format='[%(levelname)1.1s %(asctime)s] '
-                           '%(name)-15s '
-                           '%(threadName)-20s '
-                           '%(message)s')
+parser = argparse.ArgumentParser()
+parser.add_argument("--debug",    help="log at debug level",
+                                  action='store_true')
+parser.add_argument("--usb-only", help="manage usb modems only",
+                                  action='store_true')
 
 
 def stop_ioloop():
@@ -21,6 +22,18 @@ def stop_ioloop():
 
 
 def main():
+    args = parser.parse_args()
+
+    level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(level=level,
+                        format='[%(levelname)1.1s %(asctime)s] '
+                               #'%(name)-15s '
+                               '%(threadName)-20s '
+                               '%(message)s')
+
+
+    serial_manager = SerialPortManager(args.usb_only)
+
     http_client_manager.start()
     sim_manager.start()
     serial_manager.start()
