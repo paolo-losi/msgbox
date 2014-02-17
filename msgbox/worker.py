@@ -8,7 +8,7 @@ from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
 from msgbox.http import http_client_manager
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
                         ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq)
-from msgbox.util import status
+from msgbox.util import status, cached_property
 
 
 # TODO make me nicer
@@ -66,7 +66,7 @@ class ModemWorker(Actor):
     def connect(self):
         self.state = 'connecting'
         try:
-            self.modem = GsmModem(self.dev, 9600,
+            self.modem = GsmModem(self.dev,
                                   smsReceivedCallbackFunc=self._rx_sms)
             self.modem.connect('6699')
         except TimeoutException:
@@ -83,7 +83,7 @@ class ModemWorker(Actor):
                 return self.register
 
         self._try_modem_close()
-        msg = self.receive(typ=StopActor, timeout=5)
+        msg = self.receive(typ=StopActor, timeout=50)
         if isinstance(msg, StopActor):
             return self.shutdown
         if isinstance(msg, Timeout):
@@ -150,14 +150,14 @@ class ModemWorker(Actor):
     def work(self):
         self.state = 'working'
         self._process_backlog()
-        msg = self.receive(timeout=2)
+        msg = self.receive(timeout=5)
         if isinstance(msg, StopActor):
             return self.shutdown
         elif isinstance(msg, SimConfigChanged):
             # FIXME
             return self.work
         elif isinstance(msg, Timeout):
-            self._is_network_available()
+            self._is_network_available
             return self.work
         elif isinstance(msg, TxSmsReq):
             self._send_sms(msg)
@@ -188,7 +188,7 @@ class ModemWorker(Actor):
 
     def _send_sms(self, tx_sms):
         # TODO handle delivery report
-        if not self._is_network_available():
+        if not self._is_network_available:
             err_msg = '%s: network unavailable' % tx_sms
             tx_sms.callback(status('ERROR', err_msg))
             return
@@ -199,6 +199,7 @@ class ModemWorker(Actor):
         else:
             tx_sms.callback(status('OK', '%s: sms sent' % tx_sms))
 
+    @cached_property(ttl=30)
     def _is_network_available(self):
         try:
             sig_strength = self.modem.waitForNetworkCoverage(timeout=3)
@@ -212,6 +213,7 @@ class ModemWorker(Actor):
         return ret
 
     def _rx_sms(self, sms):
+        # FIXME what if state == 'stopped'?
         if isinstance(sms, ReceivedSms):
             self.send(RxSmsReq(sms))
 
