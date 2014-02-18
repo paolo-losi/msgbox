@@ -100,6 +100,7 @@ class ModemWorker(Actor):
         if isinstance(msg, ChannelClosed):
             return None
         else:
+            # FIXME there may be a queue of SMS txt requests
             logger.error('unexpected msg type %s', msg)
             return self.shutdown
 
@@ -156,6 +157,8 @@ class ModemWorker(Actor):
             logger.error('error while processing stored sms', exc_info=True)
             self.serial_manager.send(ShutdownNotification(self))
             return self.shutdown
+
+        # TODO check imsi (sim hot swap)
             
         msg = self.receive(timeout=5)
         if isinstance(msg, StopActor):
