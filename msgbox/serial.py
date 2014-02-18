@@ -8,6 +8,7 @@ from serial.tools.list_ports import comports
 from msgbox import logger
 from msgbox.actor import Actor, StopActor, Timeout
 from msgbox.worker import ModemWorker
+from msgbox.sim import ShutdownNotification
 
 
 plat = sys.platform.lower()
@@ -48,16 +49,14 @@ class SerialPortManager(Actor):
 
             if dev not in self.dev2worker:
                 spi = SerialPortInfo(desc=desc, dev=dev, hw=hw)
-                mw = ModemWorker(dev=dev, serial_info=spi)
+                mw = ModemWorker(dev=dev, serial_info=spi, serial_manager=self)
+                logger.info('starting worker for device %s', dev)
                 mw.start()
                 self.dev2worker[dev] = mw
 
         for dev in self.dev2worker.keys():
             if dev not in serial_devices:
-                logger.info('stopping worker for device %s', dev)
-                worker = self.dev2worker[dev]
-                worker.send(StopActor())
-                self.remove_worker(worker)
+                logger.info('active worker on missing device %s', dev)
 
     def run(self):
         while True:
@@ -69,6 +68,11 @@ class SerialPortManager(Actor):
                     worker.send(StopActor())
                 self.dev2worker = {}
                 break
+            elif isinstance(msg, ShutdownNotification):
+                worker = msg.worker
+                assert self.dev2worker[worker.dev] == worker
+                self.remove_worker(worker)
+                logger.info('worker for device %s has shut down', worker.dev)
             elif isinstance(msg, Timeout):
                 continue
             else:

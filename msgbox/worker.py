@@ -7,7 +7,8 @@ from msgbox import logger
 from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
 from msgbox.http import http_client_manager
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
-                        ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq)
+                        ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq,
+                        ShutdownNotification)
 from msgbox.util import status, cached_property
 
 
@@ -30,7 +31,8 @@ ModemInfo = namedtuple('ModemInfo',
 
 class ModemWorker(Actor):
 
-    def __init__(self, dev, serial_info):
+    def __init__(self, dev, serial_info, serial_manager):
+        self.serial_manager = serial_manager
         self.dev = dev
         self.imsi = None
         self.serial_info = serial_info
@@ -66,7 +68,7 @@ class ModemWorker(Actor):
     def connect(self):
         self.state = 'connecting'
         try:
-            self.modem = GsmModem(self.dev,
+            self.modem = GsmModem(self.dev, 9600,
                                   smsReceivedCallbackFunc=self._rx_sms)
             self.modem.connect('6699')
         except TimeoutException:
@@ -92,8 +94,7 @@ class ModemWorker(Actor):
     def shutdown(self):
         self.state = 'shutting down'
         self.close_channel()
-        if self.sim_config is not None:
-            sim_manager.send(ImsiUnregister(self))
+        self._unregister()
         self._try_modem_close()
         msg = self.receive()
         if isinstance(msg, ChannelClosed):
@@ -149,7 +150,13 @@ class ModemWorker(Actor):
 
     def work(self):
         self.state = 'working'
-        self._process_backlog()
+        try:
+            self.modem.processStoredSms()
+        except Exception, e:
+            logger.error('error while processing stored sms', exc_info=True)
+            self.serial_manager.send(ShutdownNotification(self))
+            return self.shutdown
+            
         msg = self.receive(timeout=5)
         if isinstance(msg, StopActor):
             return self.shutdown
@@ -171,13 +178,6 @@ class ModemWorker(Actor):
 
     # ~~~~~ utils ~~~~~
 
-    def _process_backlog(self):
-        try:
-            self.modem.processStoredSms()
-        except Exception, e:
-            logger.error('error while processing stored sms', exc_info=True)
-
-
     def _send_sms_when_stopped(self, tx_sms):
         assert tx_sms.sender is None
         if not self.sim_config.active:
@@ -195,6 +195,7 @@ class ModemWorker(Actor):
         try:
             self.modem.sendSms(tx_sms.receiver, tx_sms.text)
         except Exception, e:
+            logger.error('error:', exc_info=True)
             tx_sms.callback(status('ERROR', '%s: %r' % (tx_sms, e)))
         else:
             tx_sms.callback(status('OK', '%s: sms sent' % tx_sms))
@@ -235,6 +236,11 @@ class ModemWorker(Actor):
                                revision=modem.revision,
                                signal=sig_stren_desc(modem.signalStrength))
         return imsi, modem_info
+
+    def _unregister(self):
+        if self.sim_config is not None:
+            sim_manager.send(ImsiUnregister(self))
+            self.sim_config = None
 
     def _try_modem_close(self):
         if self.modem is not None:

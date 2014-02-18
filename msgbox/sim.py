@@ -116,6 +116,7 @@ class WorkerMessage(Message):
 class SimConfigChanged(Message): pass
 class ImsiRegister(WorkerMessage): pass
 class ImsiUnregister(WorkerMessage): pass
+class ShutdownNotification(WorkerMessage): pass
 
 
 class ImsiRegistration(Message):
