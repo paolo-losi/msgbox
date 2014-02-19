@@ -1,5 +1,10 @@
-from collections import namedtuple
+import time
+from itertools import count
+from collections import namedtuple, defaultdict
+from threading import Lock, Thread
+from Queue import Queue, Empty
 
+from gsmmodem.pdu import Concatenation
 from gsmmodem.modem import (GsmModem, TimeoutException, InvalidStateException,
                             ReceivedSms, StatusReport)
 
@@ -25,6 +30,78 @@ def sig_stren_desc(n):
     return '%s %s' % (n, desc)
 
 
+class ConcatPool(object):
+
+    CONCAT_TIMEOUT = 120
+
+    def __init__(self, worker):
+        self.worker = worker
+        self.thread = None
+        self.lock = Lock()
+        self._stop_queue = Queue()
+        self.pool = defaultdict(lambda: (list(), time.time()))
+
+    def start(self):
+        self.thread = Thread(name='ConcatPool %s' % self.worker.dev,
+                             target=self._work)
+        self.thread.start()
+
+    def stop(self):
+        self._stop_queue.put(None)
+        self.thread.join()
+
+    def _work(self):
+        while True:
+            try:
+                self._stop_queue.get(timeout=10)
+                break
+            except Empty:
+                pass
+            now = time.time()
+            with self.lock:
+                for k, v in self.pool.items():
+                    sms_dicts, tstamp = v
+                    if now - tstamp > self.CONCAT_TIMEOUT:
+                        del self.pool[k]
+                        sms_dict = self._process_concat_msg(sms_dicts)
+                        logger.warn('concat sms timeout - '
+                                    'sender=%s recipient=%s',
+                                     sms_dict['sender'], sms_dict['recipient'])
+                        self.worker.send(RxSmsReq(sms_dict))
+
+    def merge(self, sms_dict):
+        with self.lock:
+            concat = sms_dict['concat']
+            key = (sms_dict['sender'],
+                   sms_dict['recipient'],
+                   concat.reference)
+            sms_dicts, tstamp = self.pool[key]
+            sms_dicts.append(sms_dict)
+            if len(sms_dicts) == concat.parts:
+                del self.pool[key]
+                return self._process_mo_sms(sms_dicts)
+            else:
+                return None
+
+    def _process_concat_msg(self, sms_dicts):
+        by_id = {}
+        for sd in sms_dicts:
+            id = int(sd['concat'].number)
+            by_id[id] = sd
+
+        sms_dict = dict(sms_dicts[0])
+        sms_dict['text'] = ''
+        for i in range(1, sms_dict['concat'].parts + 1):
+            sd = by_id.get(i)
+            logger.error('sd %s', sd)
+            if sd is None:
+                sms_dict['text'] += '<###missing###>'
+            else:
+                sms_dict['text'] += sd['text']
+        del sms_dict['concat']
+        return sms_dict
+
+
 ModemInfo = namedtuple('ModemInfo',
             ['imei', 'manufacturer', 'model', 'network', 'revision', 'signal'])
 
@@ -40,6 +117,8 @@ class ModemWorker(Actor):
         self.sim_config = None
 
         self.modem = None
+        self.concat_pool = ConcatPool(self)
+        self.concat_pool.start()
         self.state = 'initialized'
         super(ModemWorker, self).__init__('Modem %s' % dev)
 
@@ -93,11 +172,12 @@ class ModemWorker(Actor):
 
     def shutdown(self):
         self.state = 'shutting down'
-        self.close_channel()
-        self._unregister()
         self._try_modem_close()
+        self.concat_pool.stop()
+        self.close_channel()
         msg = self.receive()
         if isinstance(msg, ChannelClosed):
+            self._unregister()
             return None
         else:
             # FIXME there may be a queue of SMS txt requests
@@ -143,7 +223,7 @@ class ModemWorker(Actor):
             return self.stop
 
     def deactivate(self):
-        # FIXME is that correct to close here?
+        # FIXME sim hot swap not supported here
         self._try_modem_close()
         self.state = 'deactivated'
         self.receive(typ=StopActor)
@@ -173,7 +253,7 @@ class ModemWorker(Actor):
             self._send_sms(msg)
             return self.work
         elif isinstance(msg, RxSmsReq):
-            self._process_mo_sms(msg.sms)
+            self._process_mo_sms(msg.sms_dict)
             return self.work
         else:
             logger.error('unexpected msg type %s', msg)
@@ -219,15 +299,30 @@ class ModemWorker(Actor):
     def _rx_sms(self, sms):
         # FIXME what if state == 'stopped'?
         if isinstance(sms, ReceivedSms):
-            self.send(RxSmsReq(sms))
+            sms_dict = dict(sender=sms.number,
+                            recipient=self.sim_config.phone_number,
+                            text=sms.text,
+                            tstamp=sms.time,
+                            url=self.sim_config.url)
+            if sms.udh is not None:
+                concats = [i for i in sms.udh if isinstance(i, Concatenation)]
+                assert len(concats) == 1
+                sms_dict['concat'] = concats[0]
+            self.send(RxSmsReq(sms_dict))
 
-    def _process_mo_sms(self, sms):
-        http_client_manager.enqueue(dict(
-                        sender=sms.number,
-                        recipient=self.sim_config.phone_number,
-                        text=sms.text,
-                        tstamp=sms.time,
-                        url=self.sim_config.url))
+    def _process_mo_sms(self, sms_dict):
+        if 'concat' in sms_dict:
+            logger.warn('concat sms received - '
+                        'sender=%s recipient=%s part=%d/%d',
+                         sms_dict['sender'],
+                         sms_dict['recipient'],
+                         sms_dict['concat'].number,
+                         sms_dict['concat'].parts)
+            concat_sms_dict = self.concat_pool.merge(sms_dict)
+            if concat_sms_dict:
+                http_client_manager.enqueue(concat_sms_dict)
+        else:
+            http_client_manager.enqueue(sms_dict)
 
     def _get_modem_info(self):
         modem = self.modem

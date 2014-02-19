@@ -152,8 +152,8 @@ class TxSmsReq(Message):
 
 class RxSmsReq(Message):
 
-    def __init__(self, sms):
-        self.sms = sms
+    def __init__(self, sms_dict):
+        self.sms_dict = sms_dict
 
 
 class SimManager(Actor):

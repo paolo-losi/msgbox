@@ -3,6 +3,7 @@ args: --debug
 args: --usb-only
 main: trap SIGTERM
 support hot swap of sim
+move al actor messages in msgbox.messages
 
 python-gsmmodem
     * obtain imsi even if phone has pin
