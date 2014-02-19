@@ -79,7 +79,7 @@ class ConcatPool(object):
             sms_dicts.append(sms_dict)
             if len(sms_dicts) == concat.parts:
                 del self.pool[key]
-                return self._process_mo_sms(sms_dicts)
+                return self._process_concat_msg(sms_dicts)
             else:
                 return None
 
