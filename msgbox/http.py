@@ -1,4 +1,5 @@
 import time
+import urllib
 import urllib2
 from Queue import Queue, Empty
 from functools import partial
@@ -17,27 +18,27 @@ ioloop = tornado.ioloop.IOLoop.instance()
 
 # application/x-www-form-urlencoded
 # params:
-#   key:      "asds7878"      (optional)
-#   receiver: "+393482222222"
-#   sender:   "+393481111111"
-#   imsi:     "21312123232"
-#   text:     "sms text"
+#   key:       "asds7878"      (optional)
+#   recipient: "+393482222222"
+#   sender:    "+393481111111"
+#   imsi:      "21312123232"
+#   text:      "sms text"
 
 class MTHandler(RequestHandler):
 
     @asynchronous
     def post(self):
-        sender   = self.get_argument('sender', None)
-        receiver = self.get_argument('receiver')
-        text     = self.get_argument('text')
-        imsi     = self.get_argument('imsi', None)
-        key      = self.get_argument('key', None)
+        sender    = self.get_argument('sender', None)
+        recipient = self.get_argument('recipient')
+        text      = self.get_argument('text')
+        imsi      = self.get_argument('imsi', None)
+        key       = self.get_argument('key', None)
 
         if not ((sender is None) ^ (imsi is None)):
             err_msg = 'Use either "sender" or "imsi" params'
             raise HTTPError(400, err_msg)
 
-        sim_manager.send(TxSmsReq(sender, receiver, text, imsi, key,
+        sim_manager.send(TxSmsReq(sender, recipient, text, imsi, key,
                                   callback=self.reply_callback))
 
     def reply_callback(self, response_dict):
@@ -106,9 +107,11 @@ class HTTPClientManager(object):
             url = msg_dict.pop('url')
             for attempt in xrange(3):
                 try:
-                    urllib2.urlopen(url, msg_dict, timeout=20)
-                    logger.error('forwarded sms - sender=%s receiver=%s',
-                                     msg_dict['sender'], msg_dict['receiver'])
+                    msg_dict['text'] = msg_dict['text'].encode('utf8')	
+                    data = urllib.urlencode(msg_dict)
+                    urllib2.urlopen(url, data, timeout=20)
+                    logger.error('forwarded sms - sender=%s recipient=%s',
+                                     msg_dict['sender'], msg_dict['recipient'])
                     break
                 except Exception, e:
                     logger.error('error while sending msg', exc_info=True)

@@ -196,7 +196,7 @@ class ModemWorker(Actor):
             tx_sms.callback(status('ERROR', err_msg))
             return
         try:
-            self.modem.sendSms(tx_sms.receiver, tx_sms.text)
+            self.modem.sendSms(tx_sms.recipient, tx_sms.text)
         except Exception, e:
             logger.error('error:', exc_info=True)
             tx_sms.callback(status('ERROR', '%s: %r' % (tx_sms, e)))
@@ -224,7 +224,7 @@ class ModemWorker(Actor):
     def _process_mo_sms(self, sms):
         http_client_manager.enqueue(dict(
                         sender=sms.number,
-                        receiver=self.sim_config.phone_number,
+                        recipient=self.sim_config.phone_number,
                         text=sms.text,
                         tstamp=sms.time,
                         url=self.sim_config.url))

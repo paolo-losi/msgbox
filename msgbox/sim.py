@@ -134,9 +134,9 @@ class StopSimManager(StopActor):
 
 class TxSmsReq(Message):
 
-    def __init__(self, sender, receiver, text, imsi, key, callback=None):
+    def __init__(self, sender, recipient, text, imsi, key, callback=None):
         self.sender = sender
-        self.receiver = receiver
+        self.recipient = recipient
         self.text = text
         self.imsi = imsi
         self.key = key
