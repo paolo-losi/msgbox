@@ -32,7 +32,7 @@ def sig_stren_desc(n):
 
 class ConcatPool(object):
 
-    CONCAT_TIMEOUT = 120
+    CONCAT_TIMEOUT = 300
 
     def __init__(self, worker):
         self.worker = worker
@@ -93,7 +93,6 @@ class ConcatPool(object):
         sms_dict['text'] = ''
         for i in range(1, sms_dict['concat'].parts + 1):
             sd = by_id.get(i)
-            logger.error('sd %s', sd)
             if sd is None:
                 sms_dict['text'] += '<###missing###>'
             else:
