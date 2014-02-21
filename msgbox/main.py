@@ -1,5 +1,8 @@
 import argparse
 import logging
+import signal
+import sys
+
 import tornado.ioloop
 
 from msgbox import logger
@@ -15,7 +18,7 @@ parser.add_argument("--usb-only", help="manage usb modems only",
                                   action='store_true')
 
 
-def stop_ioloop():
+def finalize_shutdown():
     http_client_manager.stop()
     ioloop = tornado.ioloop.IOLoop.instance()
     ioloop.add_callback(ioloop.stop)
@@ -40,7 +43,7 @@ def main():
     http_server_manager.start()
     try:
         tornado.ioloop.IOLoop.instance().start()
-    except KeyboardInterrupt:
+    except KeyboardInterrupt, SystemExit:
         pass
     except Exception:
         logger.error('error trapped', exc_info=True)
@@ -48,7 +51,10 @@ def main():
         logger.info("shutting down ...")
         http_server_manager.stop()
         serial_manager.stop()
-        sim_manager.stop(stop_ioloop)
+        sim_manager.stop(finalize_shutdown)
+
+
+signal.signal(signal.SIGTERM, lambda sig, frame: sys.exit(0))
 
 
 if __name__ == '__main__':

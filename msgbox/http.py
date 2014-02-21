@@ -110,7 +110,7 @@ class HTTPClientManager(object):
                     msg_dict['text'] = msg_dict['text'].encode('utf8')	
                     data = urllib.urlencode(msg_dict)
                     urllib2.urlopen(url, data, timeout=20)
-                    logger.error('forwarded sms - sender=%s recipient=%s',
+                    logger.info('forwarded sms - sender=%s recipient=%s',
                                      msg_dict['sender'], msg_dict['recipient'])
                     break
                 except Exception, e:
