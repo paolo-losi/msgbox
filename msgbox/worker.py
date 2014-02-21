@@ -14,7 +14,7 @@ from msgbox.http import http_client_manager
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
                         ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq,
                         ShutdownNotification)
-from msgbox.util import status, cached_property
+from msgbox.util import status, cached_property, convert_to_international
 
 
 # TODO make me nicer
@@ -298,7 +298,12 @@ class ModemWorker(Actor):
     def _rx_sms(self, sms):
         # FIXME what if state == 'stopped'?
         if isinstance(sms, ReceivedSms):
-            sms_dict = dict(sender=sms.number,
+            try:
+                number = convert_to_international(sms.number, sms.smsc)
+            except Exception, e:
+                logger.error('error while converting to int: %s', e)
+                number = sms.number
+            sms_dict = dict(sender=number,
                             recipient=self.sim_config.phone_number,
                             text=sms.text,
                             tstamp=sms.time,

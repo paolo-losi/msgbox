@@ -26,3 +26,14 @@ def cached_property(ttl):
             return ret
         return property(get)
     return wrap
+
+
+def convert_to_international(number, smsc):
+    if number.startswith('+'):
+        return number
+    else:
+        if smsc.startswith('+55'): # brazil
+            return '+55' + number[1:]
+        if smsc.startswith('+39'): # italy
+            return '+39' + number
+        raise ValueError('convert_to_int. number=%s smsc=%s' % (number, smsc))

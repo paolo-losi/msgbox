@@ -54,7 +54,7 @@ class MTHandler(RequestHandler):
 
 class HTTPServerManager(object):
 
-    def __init__(self, port=8888):
+    def __init__(self, port=8080):
         app = Application([
             (r"/send_sms", MTHandler),
         ])
