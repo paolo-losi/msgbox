@@ -1,9 +1,10 @@
-worker: no_network state?
-args: --debug
-args: --usb-only
+https handling
+security key for MT request
 main: trap SIGTERM
+worker: no_network state?
 support hot swap of sim
 move al actor messages in msgbox.messages
+handle sms notification
 
 python-gsmmodem
     * obtain imsi even if phone has pin
