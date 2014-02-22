@@ -1,18 +1,17 @@
 import time
-from itertools import count
 from collections import namedtuple, defaultdict
 from threading import Lock, Thread
 from Queue import Queue, Empty
 
 from gsmmodem.pdu import Concatenation
 from gsmmodem.modem import (GsmModem, TimeoutException, InvalidStateException,
-                            ReceivedSms, StatusReport)
+                            ReceivedSms, StatusReport, Sms)
 
 from msgbox import logger
 from msgbox.actor import Actor, StopActor, Timeout, ChannelClosed
 from msgbox.http import http_client_manager
 from msgbox.sim import (sim_manager, ImsiRegister, ImsiRegistration,
-                        ImsiUnregister, SimConfigChanged, TxSmsReq, RxSmsReq,
+                        ImsiUnregister, SimConfigChanged, TxSmsReq,
                         ShutdownNotification)
 from msgbox.util import status, cached_property, convert_to_international
 
@@ -67,7 +66,7 @@ class ConcatPool(object):
                         logger.warn('concat sms timeout - '
                                     'sender=%s recipient=%s',
                                      sms_dict['sender'], sms_dict['recipient'])
-                        self.worker.send(RxSmsReq(sms_dict))
+                        http_client_manager.enqueue(sms_dict)
 
     def merge(self, sms_dict):
         with self.lock:
@@ -146,9 +145,8 @@ class ModemWorker(Actor):
     def connect(self):
         self.state = 'connecting'
         try:
-            self.modem = GsmModem(self.dev, 9600,
-                                  smsReceivedCallbackFunc=self._rx_sms)
-            self.modem.connect('6699')
+            self.modem = GsmModem(self.dev, 19200)
+            self.modem.connect()
         except TimeoutException:
             self.state = 'no modem detected'
         except Exception, e:
@@ -212,11 +210,6 @@ class ModemWorker(Actor):
         elif isinstance(msg, TxSmsReq):
             self._send_sms_when_stopped(msg)
             return self.stop
-        elif isinstance(msg, RxSmsReq):
-            # FIXME enqueue somewhere?
-            sms = msg.sms
-            logger.error('NOT processing sms from %s %r', sms.number, sms.text)
-            return self.stop
         else:
             logger.error('unexpected msg type %s', msg)
             return self.stop
@@ -231,8 +224,8 @@ class ModemWorker(Actor):
     def work(self):
         self.state = 'working'
         try:
-            self.modem.processStoredSms()
-        except Exception, e:
+            self._process_stored_sms()
+        except Exception:
             logger.error('error while processing stored sms', exc_info=True)
             self.serial_manager.send(ShutdownNotification(self))
             return self.shutdown
@@ -250,9 +243,6 @@ class ModemWorker(Actor):
             return self.work
         elif isinstance(msg, TxSmsReq):
             self._send_sms(msg)
-            return self.work
-        elif isinstance(msg, RxSmsReq):
-            self._process_mo_sms(msg.sms_dict)
             return self.work
         else:
             logger.error('unexpected msg type %s', msg)
@@ -287,16 +277,22 @@ class ModemWorker(Actor):
         try:
             sig_strength = self.modem.waitForNetworkCoverage(timeout=3)
             ret = sig_strength > 0
-        except (TimeoutException, InvalidStateException), e:
+        except (TimeoutException, InvalidStateException):
             ret = False
-        except Exception, e:
+        except Exception:
             ret = False
         _log = logger.info if ret else logger.error
         _log('network check: available=%s', ret)
         return ret
 
+    def _process_stored_sms(self):
+        states = [Sms.STATUS_RECEIVED_READ, Sms.STATUS_RECEIVED_UNREAD]
+        for status in states:
+            messages = self.modem.listStoredSms(status=status, delete=True)
+            for sms in messages:
+                self._rx_sms(sms)
+
     def _rx_sms(self, sms):
-        # FIXME what if state == 'stopped'?
         if isinstance(sms, ReceivedSms):
             try:
                 number = convert_to_international(sms.number, sms.smsc)
@@ -308,24 +304,23 @@ class ModemWorker(Actor):
                             text=sms.text,
                             tstamp=sms.time,
                             url=self.sim_config.url)
+
             if sms.udh is not None:
                 concats = [i for i in sms.udh if isinstance(i, Concatenation)]
-                assert len(concats) == 1
-                sms_dict['concat'] = concats[0]
-            self.send(RxSmsReq(sms_dict))
+                assert len(concats) <= 1
+                if concats:
+                    sms_dict['concat'] = concats[0]
+                    logger.info('concat sms received - '
+                                'sender=%s recipient=%s part=%d/%d',
+                                 sms_dict['sender'],
+                                 sms_dict['recipient'],
+                                 sms_dict['concat'].number,
+                                 sms_dict['concat'].parts)
+                    concat_sms_dict = self.concat_pool.merge(sms_dict)
+                    if concat_sms_dict:
+                        http_client_manager.enqueue(concat_sms_dict)
+                    return
 
-    def _process_mo_sms(self, sms_dict):
-        if 'concat' in sms_dict:
-            logger.warn('concat sms received - '
-                        'sender=%s recipient=%s part=%d/%d',
-                         sms_dict['sender'],
-                         sms_dict['recipient'],
-                         sms_dict['concat'].number,
-                         sms_dict['concat'].parts)
-            concat_sms_dict = self.concat_pool.merge(sms_dict)
-            if concat_sms_dict:
-                http_client_manager.enqueue(concat_sms_dict)
-        else:
             http_client_manager.enqueue(sms_dict)
 
     def _get_modem_info(self):

@@ -150,12 +150,6 @@ class TxSmsReq(Message):
         return "sms tx request for %s" % field
 
 
-class RxSmsReq(Message):
-
-    def __init__(self, sms_dict):
-        self.sms_dict = sms_dict
-
-
 class SimManager(Actor):
 
     def __init__(self):
